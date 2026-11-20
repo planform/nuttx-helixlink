@@ -1,0 +1,83 @@
+HPM5300 register headers
+======================
+
+Layout
+------
+hpm_memorymap.h contains the common RISC-V memory-map dependency and idle
+stack definitions. It includes hardware/hpm_memorymap.h.
+hardware/hpm_*.h are chip selectors, selected by CONFIG_ARCH_CHIP_HPM5361.
+hardware/hpm5361/hpm5361_*.h contain the HPM5361-specific definitions.
+A future chip needs its own directory and branches in the selectors; do not
+force CONFIG_ARCH_FAMILY_* from a header.
+Drivers include the hardware/hpm_*.h headers they use. Memory-map headers do
+not include peripheral register headers, avoiding circular includes.
+
+Sources
+-------
+HPM5300UM Rev1.2 (workspace docs/HPM5300UMV12.pdf), printed page numbers:
+  chapter 5, pp.79 onward: MCHTMR offsets and RV32 access requirements;
+  chapter 13, pp.136 onward: SYSCTL register tables;
+  chapter 16, pp.172 onward: system memory/peripheral map;
+  chapter 22, pp.291 onward: IOC/PIOC PAD register layout;
+  chapter 23, pp.298 onward: GPIO DI/DO/OE register groups;
+  chapter 46, pp.690 onward: UART register layout and field definitions;
+  chapter 47, pp.708-721: SPI registers, counts and FIFO/clock behavior.
+HPM5300DS Rev0.12 (docs/HPM5300DSV012.pdf), p.65:
+  SPI master minimum SCK period is 12.5 ns (80 MHz controller limit).
+
+Machine-readable companion material from the original project's SDK:
+  helixlink/02_software/firmware/lib/hpm_sdk/soc/HPM5300/
+    HPM5361/HPM5361_svd.xml
+    HPM5361/hpm_soc_ip.h
+    HPM5361/hpm_iomux.h
+    ip/hpm_mchtmr_regs.h
+    ip/hpm_gpio_regs.h
+    ip/hpm_ioc_regs.h
+    ip/hpm_sysctl_regs.h
+    ip/hpm_spi_regs.h
+These SDK-derived definitions retain the HPMicro BSD-3-Clause attribution.
+UART, PLIC and CSR definitions retain their existing license notices.
+
+Coverage and usage
+------------------
+The memory map includes all 79 peripheral instances listed in the HPM5361
+SVD and additional SDK instance bases, plus local RAM, aliases, ROM and the XPI memory window base.
+It does not describe every memory-window size or every register of every
+peripheral. The requested MCHTMR, SYSCTL and IOC register blocks include all
+SVD registers, array counts/indices, offsets, addresses and field masks.
+Named indices marked reserved by the SVD are intentionally omitted. Array
+counts describe the register layout, not a guarantee that every index is a
+usable resource or bonded pad. Consult the manual and package pinout.
+
+Examples:
+  HPM_UART3_LSR
+  HPM_MCHTMR_MTIME_LO / HPM_MCHTMR_MTIME_HI
+  HPM_SYSCTL_CLOCK(HPM_SYSCTL_CLOCK_CLK_TOP_URT3)
+  HPM_SYSCTL_RESOURCE(HPM_SYSCTL_RESOURCE_URT3)
+  HPM_IOC_PAD_FUNC_CTL(HPM_IOC_PAD_PB15)
+  IOC_PB15_FUNC_CTL_UART3_TXD
+
+SYSCTL index constants are indices, not absolute addresses. CLOCK and
+RESOURCE have different index spaces. Indexed register macros accept numeric
+indices; field macros evaluate their argument once and mask it to the field.
+The SDK-compatible IOC field helpers and pin-mux names are also provided.
+PIOC address helpers reuse the PAD stride but only documented PIOC pads may
+be accessed. MCHTMR is 64-bit; LO/HI aliases do not provide atomic RV32 access.
+No register definition enables a clock, configures a pin or initializes a
+peripheral. Those operations remain driver/board initialization work.
+
+Validation
+----------
+Cross-compiled C static assertions compare 1333 register offsets against the
+independent SDK C structure layouts. Compared 93 matching field masks with
+SDK definitions. Repeated header includes, RV32 assembly use and the existing
+hpm_head.S were compiled independently. The full firmware has not been built
+or run on hardware as part of this header-only change.
+
+GPIO header validation
+----------------------
+GPIO DI/DO/OE offsets were checked against SDK GPIO_Type for A/B/X/Y.
+Absolute address formulas were checked for GPIO0/PGPIO/FGPIO (144 offset
+and address assertions plus four port-index assertions). C and RV32 assembly
+can include the headers repeatedly. These formulas do not establish which
+ports a controller owns; the GPIO driver must validate that separately.

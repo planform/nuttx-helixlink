@@ -1,0 +1,14 @@
+comment "HelixLink V2.0 Board Configuration"
+
+config HELIXLINK_SPIFLASH
+	bool "External W25Q128 Flash on SPI1"
+	default n
+	depends on HPM_SPI1 && BOARD_LATE_INITIALIZE
+	depends on !DISABLE_MOUNTPOINT
+	select MTD
+	select MTD_W25
+	---help---
+		Probe the external W25Q128JV and register /dev/mtd0 during board
+		late initialization. No filesystem is mounted or formatted.
+		The nsh defconfig uses W25_READONLY for initial bring-up. Disabling
+		W25_READONLY enables normal W25 writes and initialization unprotect.

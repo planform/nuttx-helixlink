@@ -330,6 +330,19 @@ config ARCH_CHIP_HPM6750
 	---help---
 		Hpmicro HPM6750 processor (D45 RISC-V Core with MAC extensions).
 
+config ARCH_CHIP_HPM5300
+	bool "HPMicro HPM5300"
+	select ARCH_RV32
+	select ARCH_RV_ISA_M
+	select ARCH_RV_ISA_A
+	select ARCH_RV_ISA_C
+	select ONESHOT
+	select ONESHOT_COUNT
+	select ONESHOT_FAST_DIVISION
+	select ALARM_ARCH
+	---help---
+		HPMicro HPM5300 series microcontrollers.
+
 config ARCH_CHIP_JH7110
 	bool "StarFive JH7110"
 	select ARCH_RV64
@@ -640,6 +653,7 @@ config ARCH_CHIP
 	default "qemu-rv"               if ARCH_CHIP_QEMU_RV
 	default "hpm6000"               if ARCH_CHIP_HPM6000
 	default "hpm6750"               if ARCH_CHIP_HPM6750
+	default "hpm5300"				if ARCH_CHIP_HPM5300
 	default "jh7110"                if ARCH_CHIP_JH7110
 	default "bl808"                 if ARCH_CHIP_BL808
 	default "k230"                  if ARCH_CHIP_K230
@@ -894,6 +908,9 @@ source "arch/risc-v/src/hpm6000/Kconfig"
 endif
 if ARCH_CHIP_HPM6750
 source "arch/risc-v/src/hpm6750/Kconfig"
+endif
+if ARCH_CHIP_HPM5300
+source "arch/risc-v/src/hpm5300/Kconfig"
 endif
 if ARCH_CHIP_JH7110
 source "arch/risc-v/src/jh7110/Kconfig"

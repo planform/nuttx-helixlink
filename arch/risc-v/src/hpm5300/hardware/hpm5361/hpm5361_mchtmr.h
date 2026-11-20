@@ -1,0 +1,36 @@
+/*
+ * Copyright (c) 2021-2026 HPMicro
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Register definitions adapted from the HPM5300 SDK and HPM5361 SVD.
+ * See hpm5300/REGISTER_SOURCES.txt for provenance and manual references.
+ */
+
+#ifndef __ARCH_RISCV_SRC_HPM5300_HARDWARE_HPM5361_HPM5361_MCHTMR_H
+#define __ARCH_RISCV_SRC_HPM5300_HARDWARE_HPM5361_HPM5361_MCHTMR_H
+
+#include "hpm5361_memorymap.h"
+
+/* Register offsets and absolute addresses. Array indices are numeric. */
+
+#define HPM_MCHTMR_MTIME_OFFSET  (0x0000)
+#define HPM_MCHTMR_MTIME  (HPM_MCHTMR_BASE + HPM_MCHTMR_MTIME_OFFSET)
+#define HPM_MCHTMR_MTIME_LO  (HPM_MCHTMR_MTIME + 0)
+#define HPM_MCHTMR_MTIME_HI  (HPM_MCHTMR_MTIME + 4)
+
+#define HPM_MCHTMR_MTIMECMP_OFFSET  (0x0008)
+#define HPM_MCHTMR_MTIMECMP  (HPM_MCHTMR_BASE + HPM_MCHTMR_MTIMECMP_OFFSET)
+#define HPM_MCHTMR_MTIMECMP_LO  (HPM_MCHTMR_MTIMECMP + 0)
+#define HPM_MCHTMR_MTIMECMP_HI  (HPM_MCHTMR_MTIMECMP + 4)
+
+/* Register fields. Values passed to field macros must fit the field. */
+
+#define HPM_MCHTMR_MTIME_MTIME_SHIFT  0
+#define HPM_MCHTMR_MTIME_MTIME_MASK  0xffffffffffffffffULL
+#define HPM_MCHTMR_MTIME_MTIME(v)  (((v) << HPM_MCHTMR_MTIME_MTIME_SHIFT) & HPM_MCHTMR_MTIME_MTIME_MASK)
+#define HPM_MCHTMR_MTIMECMP_MTIMECMP_SHIFT  0
+#define HPM_MCHTMR_MTIMECMP_MTIMECMP_MASK  0xffffffffffffffffULL
+#define HPM_MCHTMR_MTIMECMP_MTIMECMP(v)  (((v) << HPM_MCHTMR_MTIMECMP_MTIMECMP_SHIFT) & HPM_MCHTMR_MTIMECMP_MTIMECMP_MASK)
+
+#endif /* __ARCH_RISCV_SRC_HPM5300_HARDWARE_HPM5361_HPM5361_MCHTMR_H */

@@ -1,0 +1,104 @@
+HPM5300 / HelixLink bring-up
+==========================
+
+Build from nuttx/ using the matching sibling apps/ tree:
+  ./tools/configure.sh -l helixlink:nsh
+  make -j4 CROSSDEV=riscv-none-elf- VERSION_ARG="-v 13.1.0"
+
+Architecture code is independent of HelixLink's pin and clock choices.
+boards/risc-v/hpm5300/helixlink supplies const GPIO and clock descriptors.
+The register selectors under hardware/ select the hpm5361/ definitions.
+
+Implemented integration:
+  - ILM/DLM startup, initial stack, global pointer and trap entry.
+  - PLIC interrupt initialization and claim/complete dispatch.
+  - IOC/PIOC pin mux, GPIO0/FGPIO/PGPIO configuration and GPIO read/write.
+  - Board-driven UART0..7 clocks and the early polled console.
+  - IRQ serial lower half: device setup/shutdown, registration, RX/TX,
+    cached receive errors, GPIO or peripheral RTS, CTS, and polled up_putc.
+    ttyS numbers match hardware UART numbers; UART3 is ttyS3 on HelixLink.
+    Lowsetup initializes only the console. Other UARTs initialize on open.
+  - Polling SPI0..3 master with standard NuttX SPI operations, modes 0..3,
+    1..16-bit words, exchange/block APIs, and optional LSB-first operation.
+    HelixLink SPI1 pin/clock policy and GPIO CS/WP/HOLD live in boards/.
+    Board late initialization sets up SPI1. Optional HELIXLINK_SPIFLASH
+    probes the external W25Q128JV and registers /dev/mtd0.
+  - MCHTMR uses the existing common RISC-V oneshot/alarm lower half.
+
+Clock policy:
+  HPM_CLOCK_SOURCE_OSC0 means CLK_24M (HPM5300UM Rev1.2 p.100), automatically
+  supplied by XTAL24M or RC24M. The board describes its nominal frequency.
+  Baseline setup enables bus/GPIO resources without changing CPU/PLL clocks.
+  Boards selecting PLL sources must prepare them and report their frequency.
+
+Validation scope:
+  RV32 standalone compilation and a 37-configuration UART/flow-control build
+  matrix; simulated MMIO tests for clock fields, resource groups, busy/error
+  paths, GPIO sequencing, RX error caching, interrupt dispatch/backpressure,
+  transmit start, and debug-output interrupt-mask restoration.
+  These checks do not establish electrical timing or successful hardware boot.
+
+Remaining capability limits:
+  No UART DMA or dynamic termios support is advertised. DMA requests fail at
+  compile time; unsupported ioctls return -ENOTTY. RS485 and inverted RTS are
+  rejected by the low-level configuration API rather than silently ignored.
+  BOARD_LOOPSPERMSEC is still an uncalibrated bring-up setting. USB, radio,
+  flash boot layout and application protocols remain outside this build port.
+
+SPI integration notes:
+  hpm_spibus_initialize(bus) is a task-context API with interrupts enabled.
+  The default board clock is nominal CLK_24M; initial SCLK is 400 kHz.
+  Clients must lock the bus, configure it, select, transfer, deselect, unlock.
+  Timeout is CONFIG_HPM_SPI_TIMEOUT milliseconds without FIFO progress, or
+  while waiting for idle/reset. Failure resets the controller, fills unread
+  RX words with ones, logs an error, and suppresses transfers until deselect.
+  Standard SPI exchange/send methods cannot return a negated errno; clients
+  must validate protocol responses. GPIO CS is retained across exchanges.
+  There is no SPI DMA, slave, deferred trigger, configurable delay or media
+  callback implementation. Unsupported optional operations return -ENOSYS.
+  SPI1 is not registered as /dev/spi. Optional W25 MTD integration registers
+  /dev/mtd0; no filesystem is mounted or formatted.
+
+SPI validation (host-only):
+  Full RV32 firmware link with SPI1 enabled. Thirty strict RV32 compilation
+  configurations cover each bus, all buses, exchange/block APIs and optional
+  methods. An MMIO FIFO model exercises the actual source over 168 transfer
+  cases (1/7/8/9/12/15/16-bit words, FIFO boundaries, >512 words, transmit,
+  receive, duplex and in-place buffers), clock bounds, CS continuity, repeat
+  initialization and timeout recovery. All 18 register offsets and 176 field
+  masks/shifts match SDK definitions; 608 field-helper comparisons also pass.
+  These tests do not verify physical wiring or timing on the unfinished PCB.
+
+External Flash MTD bring-up:
+  CONFIG_HELIXLINK_SPIFLASH requires SPI1, board late initialization and
+  mountpoint support. It selects the existing SPI-based MTD_W25 driver.
+  The nsh defconfig uses W25_READONLY and 400 kHz; initialization does not
+  unprotect, program, erase or format Flash. Release from deep power down
+  (0xab), status reads (0x05) and JEDEC ID reads (0x9f) are issued.
+  The expected W25Q128JVSIQ JEDEC ID is ef 40 18. Board preflight waits up
+  to 3000 ms for BUSY to clear before invoking the common driver. SPI word
+  timeouts can add their own bounded delay. Missing/wrong devices return an
+  error to board_late_initialize and do not stop NSH startup.
+  Geometry is checked against 16 MiB. With native sectors, the expected log
+  is /dev/mtd0: 16777216 bytes, block 256, erase 4096 x 4096.
+  /dev/mtd0 is an MTD inode for MTD clients and later filesystem mounting.
+  It is not a regular file or character driver for direct hexdump/dd use.
+  Repeat registration is idempotent; failed inode registration retains its
+  MTD instance to permit retry without leaking another allocation.
+
+  The common W25 driver still has unbounded run-time BUSY polling. Board
+  preflight handles normal missing/stuck-device bring-up cases; it does not
+  fix failures occurring after preflight or during subsequent reads/writes.
+  Its SPI methods also lack a transport error return. Do not infer a verified
+  Flash read/write path from a successful software build or mock test.
+
+  Fixed existing W25 read-only branches: EACCES spelling, BULKERASE denial,
+  write-only helper/cache guards, and reading protected Flash without an
+  invalid protection assertion. Corrected off_t log formats in cache code.
+  Validation: full RV32 link; eight strict W25/board compile configurations
+  (read-only/writable, sector emulation, byte-write support); actual common
+  W25 + board code tested against a simulated SPI device for missing/busy/
+  mismatched devices, allocation failure, registration retry/idempotence,
+  native 16 MiB geometry, protected reads and denied writes/erase operations.
+  No hardware was programmed or tested. Enabling writes later requires
+  disabling W25_READONLY; the common driver will then unprotect on init.

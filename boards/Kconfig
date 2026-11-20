@@ -3543,6 +3543,12 @@ config ARCH_BOARD_HPM6750EVK2
 		This is the board configuration for the port of NuttX to the Hpmicro hpm6750evk2
 		board.  This board features the RISC-V hpm6750.
 
+config ARCH_BOARD_HELIXLINK
+	bool "HelixLink V2.0"
+	depends on ARCH_CHIP_HPM5361
+	---help---
+		HelixLink V2.0 board based on HPM5361.
+
 config ARCH_BOARD_SIM
 	bool "User mode simulation"
 	select ARCH_HAVE_BUTTONS
@@ -4020,6 +4026,7 @@ config ARCH_BOARD
 	default "s698pm-dkit"                  if ARCH_BOARD_S698PM_DKIT
 	default "hpm6360evk"                   if ARCH_BOARD_HPM6360EVK
 	default "hpm6750evk2"                  if ARCH_BOARD_HPM6750EVK2
+	default "helixlink"	                   if ARCH_BOARD_HELIXLINK
 	default "at32f437-mini"                if ARCH_BOARD_AT32F437_MINI
 	default "esk32"                        if ARCH_BOARD_ESK32
 	default "csk6011a-nano"                if ARCH_BOARD_CSK6011A_NANO
@@ -5153,6 +5160,9 @@ source "boards/risc-v/hpm6000/hpm6360evk/Kconfig"
 endif
 if ARCH_BOARD_HPM6750EVK2
 source "boards/risc-v/hpm6750/hpm6750evk2/Kconfig"
+endif
+if ARCH_BOARD_HELIXLINK
+source "boards/risc-v/hpm5300/helixlink/Kconfig"
 endif
 if ARCH_BOARD_AT32F437_MINI
 source "boards/arm/at32/at32f437-mini/Kconfig"

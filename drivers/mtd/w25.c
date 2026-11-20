@@ -265,12 +265,16 @@ static void w25_unprotect(FAR struct w25_dev_s *priv);
 static uint8_t w25_waitwritecomplete(FAR struct w25_dev_s *priv);
 static inline void w25_wren(FAR struct w25_dev_s *priv);
 static inline void w25_wrdi(FAR struct w25_dev_s *priv);
+
+#ifndef CONFIG_W25_READONLY
 static bool w25_is_erased(struct w25_dev_s *priv,
                           off_t address,
                           off_t size);
 static void w25_sectorerase(FAR struct w25_dev_s *priv,
                             off_t offset);
 static inline int w25_chiperase(FAR struct w25_dev_s *priv);
+#endif
+
 static void w25_byteread(FAR struct w25_dev_s *priv,
                          FAR uint8_t *buffer,
                          off_t address,
@@ -281,7 +285,7 @@ static void w25_pagewrite(FAR struct w25_dev_s *priv,
                           off_t address,
                           size_t nbytes);
 #endif
-#ifdef CONFIG_W25_SECTOR512
+#if defined(CONFIG_W25_SECTOR512) && !defined(CONFIG_W25_READONLY)
 static void w25_cacheflush(struct w25_dev_s *priv);
 static FAR uint8_t *w25_cacheread(struct w25_dev_s *priv,
                                   off_t sector);
@@ -648,6 +652,7 @@ static inline void w25_wrdi(struct w25_dev_s *priv)
   SPI_SELECT(priv->spi, SPIDEV_FLASH(0), false);
 }
 
+#ifndef CONFIG_W25_READONLY
 /****************************************************************************
  * Name:  w25_is_erased
  ****************************************************************************/
@@ -778,6 +783,8 @@ static inline int w25_chiperase(struct w25_dev_s *priv)
   return OK;
 }
 
+#endif /* !CONFIG_W25_READONLY */
+
 /****************************************************************************
  * Name: w25_byteread
  ****************************************************************************/
@@ -785,14 +792,15 @@ static inline int w25_chiperase(struct w25_dev_s *priv)
 static void w25_byteread(FAR struct w25_dev_s *priv, FAR uint8_t *buffer,
                            off_t address, size_t nbytes)
 {
-  uint8_t status;
-
   w25_finfo("address: %08lx nbytes: %d\n", (long)address, (int)nbytes);
 
   /* Wait for any preceding write or erase operation to complete. */
 
-  status = w25_waitwritecomplete(priv);
-  DEBUGASSERT((status & (W25_SR_WEL | W25_SR_BP_MASK)) == 0);
+  /* Protection bits do not prevent reading. In particular, a read-only
+   * instance deliberately does not clear the device's protection state.
+   */
+
+  w25_waitwritecomplete(priv);
 
   /* Make sure that writing is disabled */
 
@@ -990,7 +998,8 @@ static FAR uint8_t *w25_cacheread(struct w25_dev_s *priv, off_t sector)
 
   shift   = W25_SECTOR_SHIFT - W25_SECTOR512_SHIFT;
   esectno = sector >> shift;
-  w25_finfo("sector: %ld esectno: %d shift=%d\n", sector, esectno, shift);
+  w25_finfo("sector: %jd esectno: %jd shift=%d\n",
+            (intmax_t)sector, (intmax_t)esectno, shift);
 
   /* Check if the requested erase block is already in the cache */
 
@@ -1049,7 +1058,8 @@ static void w25_cacheerase(struct w25_dev_s *priv, off_t sector)
   if (!IS_ERASED(priv))
     {
       off_t esectno  = sector >> (W25_SECTOR_SHIFT - W25_SECTOR512_SHIFT);
-      w25_finfo("sector: %ld esectno: %d\n", sector, esectno);
+      w25_finfo("sector: %jd esectno: %jd\n",
+                (intmax_t)sector, (intmax_t)esectno);
 
       w25_sectorerase(priv, esectno);
       SET_ERASED(priv);
@@ -1094,7 +1104,8 @@ static void w25_cachewrite(FAR struct w25_dev_s *priv,
         {
           off_t esectno  = sector >>
                            (W25_SECTOR_SHIFT - W25_SECTOR512_SHIFT);
-          w25_finfo("sector: %ld esectno: %d\n", sector, esectno);
+          w25_finfo("sector: %jd esectno: %jd\n",
+                    (intmax_t)sector, (intmax_t)esectno);
 
           w25_sectorerase(priv, esectno);
           SET_ERASED(priv);
@@ -1207,7 +1218,7 @@ static ssize_t w25_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
                           size_t nblocks, FAR const uint8_t *buffer)
 {
 #ifdef CONFIG_W25_READONLY
-  return -EACCESS;
+  return -EACCES;
 #else
   FAR struct w25_dev_s *priv = (FAR struct w25_dev_s *)dev;
 
@@ -1400,13 +1411,15 @@ static int w25_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
         break;
 
       case MTDIOC_BULKERASE:
-        {
-            /* Erase the entire device */
+#ifdef CONFIG_W25_READONLY
+        ret = -EACCES;
+#else
+        /* Erase the entire device */
 
-            w25_lock(priv->spi);
-            ret = w25_chiperase(priv);
-            w25_unlock(priv->spi);
-        }
+        w25_lock(priv->spi);
+        ret = w25_chiperase(priv);
+        w25_unlock(priv->spi);
+#endif
         break;
 
       case MTDIOC_ERASESTATE:
@@ -1500,8 +1513,8 @@ FAR struct mtd_dev_s *w25_initialize(FAR struct spi_dev_s *spi)
           w25_unprotect(priv);
 #endif
 
-#ifdef CONFIG_W25_SECTOR512        /* Simulate a 512 byte sector */
-          /* Allocate a buffer for the erase block cache */
+#if defined(CONFIG_W25_SECTOR512) && !defined(CONFIG_W25_READONLY)
+          /* Allocate the erase-block cache for 512-byte sector emulation. */
 
           priv->sector = kmm_malloc(W25_SECTOR_SIZE);
           if (!priv->sector)

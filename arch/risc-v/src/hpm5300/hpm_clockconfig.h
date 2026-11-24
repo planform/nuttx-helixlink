@@ -67,6 +67,7 @@ extern "C"
 #endif
 
 int hpm_clockconfig(void);
+int hpm_dma_clockconfig(void);
 uint32_t hpm_uart_clockconfig(uint32_t base);
 uint32_t hpm_mchtmr_clockconfig(void);
 uint32_t hpm_spi_clockconfig(uint32_t base);

@@ -23,6 +23,8 @@ Implemented integration:
     HelixLink SPI1 pin/clock policy and GPIO CS/WP/HOLD live in boards/.
     Board late initialization sets up SPI1. Optional HELIXLINK_SPIFLASH
     probes the external W25Q128JV and registers /dev/mtd0.
+  - General HDMA/DMAMUX lower half with 32 channels, task-context control,
+    asynchronous IRQ notifications and bounded per-channel cancellation.
   - MCHTMR uses the existing common RISC-V oneshot/alarm lower half.
 
 Clock policy:
@@ -102,3 +104,201 @@ External Flash MTD bring-up:
   native 16 MiB geometry, protected reads and denied writes/erase operations.
   No hardware was programmed or tested. Enabling writes later requires
   disabling W25_READONLY; the common driver will then unprotect on init.
+
+General DMA integration:
+  CONFIG_HPM_HDMA selects ARCH_DMA and SCHED_WORKQUEUE. The nsh defconfig
+  enables it. The common weak riscv_dma_initialize hook is retained by a
+  linker undefined-symbol reference. Bootstrap enables HDMA, performs one
+  bounded reset, masks every channel/route, initializes mutexes and notification
+  semaphores, then attaches HPM_IRQ_HDMA. Failures leave allocation unavailable.
+
+  Public APIs in hpm_dma.h:
+    alloc / free: static channel ownership, with exclusive control mutexes
+    setup: one contiguous transfer
+    setup_chain(..., false): a finite hardware descriptor chain
+    setup_chain(..., true): an autonomous hardware ring
+    setup_repeat: native INFINITELOOP, without descriptors
+    setup_stream: gated periods with explicit CPU buffer loans
+    start / stop: asynchronous launch and bounded cancellation
+    rearm: allocation-free reuse of validated setup, ports and cache plans
+    getstatus: software state, advisory hardware position and fault evidence
+    acquire_period / release_period: nonblocking acquisition, explicit return
+    buffer_alloc: cache-aligned RAM with padded capacity, original byte count
+  No SPI/QSPI or UART DMA client is enabled by this architecture work.
+
+  Allocation lazily creates one DMA-private kernel work queue. Priority and
+  stack are configurable (WORKPRIORITY=224, WORKSTACKSIZE=2048 by default).
+  Shared HPWORK/LPWORK clients may therefore stop DMA without waiting on their
+  own blocked queue. Queue-creation failure returns -ENOMEM without allocating
+  a channel, and can be retried. This queue is retained for the OS lifetime.
+  Callbacks execute on this worker, not in IRQ context. They must be short and
+  nonblocking. getstatus/acquire_period are IRQ/callback-safe; release_period
+  uses try-lock in a DMA callback and can return -EAGAIN with the loan intact.
+  Other mutating DMA APIs from the DMA worker return -EDEADLK. Task control
+  APIs require interrupts enabled and a sleepable context.
+
+  Transfer validation supports 8/16/32-bit widths; increment/decrement/fixed
+  addresses; two-level priority; per-burst/block handshake; and optional HALF.
+  Peripheral endpoints also support software triggering without a DMAMUX
+  port. Peripheral-to-peripheral transfers select one handshake endpoint;
+  hardware cannot handshake both endpoints at once, so clients must ensure
+  the other endpoint can sustain the programmed transfer rate.
+  Source width must be at least destination width, matching SDK restrictions.
+  TRANSIZE counts source transfers and fits 28 bits. Bursts accept 1..16, 32,
+  64 or 128 source transfers, selecting linear or logarithmic BURSTOPT encoding.
+  Each complete span stays in one supported window with checked arithmetic.
+  RAM sources/destinations include ILM, DLM, their aliases and HRAM. ROM/XPI0
+  are read-only sources. Clients configure XPI and enforce actual populated
+  device capacity; the 0x80000000..0x8fefffff aperture check does not probe Flash.
+  Overlapping physical source/destination spans within an entry are rejected.
+  Peripheral requests are independent of the target data instance: GPTMR can
+  drive GPIO/CRC, for example. Clients own register semantics and FIFO pacing.
+
+  DMAMUX outputs form a separate 32-port resource pool, independent of channel
+  numbers. Raw chains can change direction and request source at each entry;
+  each unique peripheral source reserves a port and each descriptor selects
+  its assigned port. Ordinary memory transfers consume none. Gated STREAM
+  reuses one reserved port and changes its route only while quiescent. ID zero
+  is valid. Sources are gathered outside the IRQ lock; reservation inside the
+  lock iterates at most 32 ports, not every descriptor. Reservation failure
+  rolls back new ports and preserves the old setup. A list requiring more
+  than 32 distinct sources returns -ENOSPC; temporary contention is -EBUSY. Stop/rearm retain ports;
+  free or successful replacement releases them. No channel rewrites a port
+  owned by another channel, even when that port number equals its own channel.
+
+  Chains allocate metadata and 32-byte DMA V2 descriptors only in task context.
+  Descriptor offsets are asserted: CTRL +0, TRANSIZE +4, SRC +8, request +0x0c,
+  DST +0x10, reserved +0x14, next +0x18, reserved +0x1c. This follows the SDK and
+  register layout, not UM table 161's older address-high format. Alignment is
+  at least 32 bytes/cache-line size; 32-byte stride never crosses a 4 KiB page.
+  Padding/reserved words are zero. Entry zero initially runs from registers;
+  the remaining chain is fetched through LLPOINTER. Rings return to entry zero.
+  Native INFINITELOOP reloads one address/length tuple and never enables links.
+  Descriptors/configurations remain immutable until hardware and work drain.
+  Config replacement validates everything before publication and preserves the
+  preceding setup on failure. No allocator is used in IRQ, completion or rearm.
+  MAX_DESCRIPTORS defaults to 64 (range 1..1024); it bounds heap/cache work,
+  rather than reserving per-channel arrays. Actual board heap still limits use.
+  Raw chains require uniform HALF policy because the sticky bit has no node
+  identity. STREAM permits differing HALF policy as well as directions/requests.
+
+  State transitions:
+    FREE -> ALLOCATED -> CONFIGURED -> RUNNING -> COMPLETING -> ALLOCATED
+    faults -> FAULT; confirmed stop -> ALLOCATED; rearm -> CONFIGURED
+    STREAM COMPLETING -> next RUNNING, or WAITING if the next period is held
+  rearm restarts at entry zero, never at an ambiguous aborted bus position.
+  It preserves descriptors/cache plans, does not allocate, and can wait for a
+  final callback to return. All CPU loans must be returned before rearm,
+  reconfiguration or free. A channel handle is valid only for its owner.
+
+  The IRQ reads the four status registers once, acknowledges only nonzero
+  observed bits, and iterates the pending-channel bitmap. It reserves all
+  events before unlocking, so callbacks cannot retag a stale global snapshot
+  after another channel restarts. There is no cache work, heap operation or
+  callback in IRQ context. The single-channel COMPLETE model constrains IRQ
+  DMA MMIO to <=8 reads/2 writes (currently 5 reads/1 write, excluding OS work
+  queue/timekeeping operations). RUNNING and COMPLETING channels remain watched
+  until bus drain, preserving errors/aborts arriving after the first TC.
+
+  Terminal work waits for CHEN clear and IDMISC idle or a different active
+  channel. A cleared enable bit alone never grants buffer reuse. Incomplete
+  drain is rescheduled without blocking the worker; deadline expiry reports
+  ERROR, retains buffers and preserves fault evidence. Work rechecks final
+  error/abort status before clearing registers. ERROR overrides success and
+  software-induced ABORT. All queued/executing work pins metadata, including
+  cache work before callbacks and the return from a callback.
+  stop suppresses further notifications, aborts only its own channel, and
+  waits for bus drain plus queued/running work. Semaphores wake an idle-hardware
+  waiter immediately; there is no 1 ms polling penalty just to finish a callback.
+  Hardware still transferring is polled with bounded sleeps. STOP_TIMEOUT is
+  100 ms by default, excluding mutex acquisition and scheduler delays. Timeout
+  quarantines channel/descriptors/device buffers until successful retry. No
+  client stop resets the controller or disrupts another channel.
+
+  Events and diagnostics:
+    COMPLETE: finite transfer/chain finished, cache ownership returned
+    HALF: advisory progress, no raw descriptor identity or buffer release
+    PERIOD: raw ring/repeat progress, or a READY commit in gated STREAM
+    STARVED: STREAM paused before reusing a period not returned by the CPU
+    ERROR / ABORT: stop is required before reclaiming device-owned resources
+  Raw TC bits can merge; neither callback counts nor a sampled link proves an
+  exact number of elapsed raw periods. getstatus returns advisory sampled
+  registers, validity flags, reserved ports, READY/loan counts, generations,
+  observed-event counts, stop/queue failures and the first-fault register
+  snapshot with its original result/events. First-fault evidence survives stop
+  until the next start; the latest operation result is separate. Position and
+  remaining-byte samples never grant ownership or constitute atomic snapshots.
+
+  Safe STREAM uses software metadata only and finite hardware periods, not a
+  live-mutated ring. Physical RAM/cache coverage of different periods must be
+  disjoint, checked using sorted intervals at setup. The worker starts the next
+  queued period before invalidating/handing out the finished one. There is a
+  software scheduling gap: peripherals need FIFO headroom, request pacing or
+  flow control. CPU READY acquisition is O(1), using a completion-order queue.
+  Generation/index/sequence tokens reject duplicate or stale returns. Hardware
+  waits at a CPU-held period; it never wraps over a CPU loan. Returning an
+  unmodified/stopped loan does not invalidate CPU-modified data. Stop preserves
+  existing CPU loans and will not let setup/rearm/free discard them; consumers
+  must return even those loans held during cancellation. During a fault, a
+  previously CPU-owned disjoint period can still be returned without restarting
+  DMA. A release racing a new fault can return -EIO after ownership transfer;
+  use stop before buffer reuse. Arbitrary application pointer lifetime and
+  synchronization still belong to the owner, as with other DMA interfaces.
+
+  Cache handling:
+  Source RAM is cleaned, destinations flushed before start and invalidated
+  after final drain. ROM/XPI sources are immutable by contract. Cached RX uses
+  whole lines unless dst_cache_exclusive explicitly grants containing padding;
+  width/byte-count alignment still applies, and DMA never transfers padding
+  merely because buffer_alloc rounded its allocation. Destination maintenance
+  covers all documented ILM/DLM aliases, including a later source through a
+  different alias. Conflicting dirty views must be synchronized by the caller
+  before start; software cannot infer which divergent cached copy is newest.
+  Raw-chain cache plans are sorted/coalesced once, including cache-window
+  boundaries. Eight repeated destination ranges need one invalidation per
+  alias, not eight; cache-disabled raw-list start/finish avoid per-node loops.
+  STREAM maintains only device-owned slots and never invalidates a CPU loan
+  or a concurrently preparing return. No cache operation holds the spinlock.
+  The board keeps ARCH_DCACHE disabled; CPU cache enablement remains a separate
+  architecture feature, not advertised by the HPM5300 Kconfig. To avoid silent
+  warm-boot corruption, startup writes back/invalidate inherited D-cache then
+  disables it and prefetch before C initialization in a cache-disabled build.
+  start returns -ENOTSUP if external code later enables a mismatched D-cache.
+
+  CONFIG_PM integration initializes the generic PM registry before drivers
+  (unless ARCH_CUSTOM_PMINIT supplies it). Deep sleep is vetoed while a channel
+  is allocated, work is pending or allocation/restoration is in progress.
+  A successful prepare atomically closes the allocation gate and masks HDMA
+  IRQ; new allocation returns -EAGAIN until normal/restore notification. Clocks
+  and registers are lazily restored with all channels FREE, never by resetting
+  another owner's transfer. Failed restoration is retryable. PM callbacks do
+  not sleep/poll or allocate. Physical SoC sleep/clock policy is still the
+  platform PM backend's job; this driver does not invent a board sleep policy.
+
+DMA validation:
+  python3 tools/test_hpm5300_dma.py builds the actual driver with cache off,
+  32/64-byte cache lines, and PM enabled. Its Linux register/OS model consumes
+  actual descriptors and copies payload bytes, checking guards, mixed widths,
+  decrement/fixed addresses, page boundaries, ring wrap and native reload.
+  It forces late error/abort during deferred completion, final write-ack drain,
+  stopped/blocked workers, work-queue failure, callback try-lock contention,
+  immediate semaphore wakeup, simultaneous channels and cancellation/restart.
+  Heap failure/invalid descriptor addresses preserve old setup and balance
+  allocations. Rearm succeeds even with every new allocation forced to fail.
+  Port exhaustion, 33-source rollback, cross-channel port isolation, stream
+  loans/sequence reuse, stopped borrowers, dirty-buffer return races, alias
+  overlap, cache-plan coalescing/window boundaries and cache-state mismatch
+  are checked. PM tests cover allocation gating, veto, rollback and retry.
+  AddressSanitizer/UndefinedBehaviorSanitizer runs use optimized host builds;
+  LeakSanitizer is disabled under ptrace and allocation balance is checked.
+  Models do not emulate physical cache contents, peripheral signal timing,
+  the full silicon arbiter or real OS thread scheduling on the finished PCB.
+
+  RV32 checks cover DMA enabled/disabled, all public API roots, PM enabled and
+  standalone cached driver objects. Cache-enabled full-board operation needs
+  the separate CPU cache backend; do not infer it from an object/model check.
+  Hardware validation remains mandatory: RAM/alias copies and guards; descriptor
+  fetch ABI; native reload/ring wrap; linear/partial bursts; request switching;
+  IRQ latency; FIFO pacing; cancellation; real cache maintenance; warm-loader
+  cache handoff; power-domain retention/restoration and contention. INTHALFSTS
+  follows the SDK W1C sequence despite the manual's ambiguous RW annotation.

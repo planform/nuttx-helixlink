@@ -31,6 +31,53 @@ config ARCH_FAMILY_HPM5361
 
 menu "HPM5300 Peripheral Selection"
 
+menu "DMA controller"
+
+config HPM_HDMA
+	bool "HDMA controller"
+	default n
+	select ARCH_DMA
+	select SCHED_WORKQUEUE
+	---help---
+		Enable the HPM5300 HDMA controller and DMAMUX support.
+		The driver provides shared DMA channel management for
+		memory transfers and DMA-capable peripherals.
+
+config HPM_HDMA_STOP_TIMEOUT
+	int "DMA channel stop timeout (milliseconds)"
+	default 100
+	range 1 60000
+	depends on HPM_HDMA
+	---help---
+		Maximum wait for a channel to stop after cancellation.
+		This is not a timeout for normal transfer completion.
+
+config HPM_HDMA_WORKPRIORITY
+	int "DMA completion worker priority"
+	default 224
+	range 1 255
+	depends on HPM_HDMA
+
+config HPM_HDMA_WORKSTACKSIZE
+	int "DMA completion worker stack size"
+	default 2048
+	range 1024 16384
+	depends on HPM_HDMA
+
+config HPM_HDMA_MAX_DESCRIPTORS
+	int "Maximum descriptors per DMA chain"
+	default 64
+	range 1 1024
+	depends on HPM_HDMA
+	---help---
+		Bound the number of copied transfer configurations and aligned
+		hardware descriptors allocated by one chain setup. Allocations
+		are made only in task context and retained until setup replaces
+		them or the quiescent channel is freed. No per-channel arrays
+		are reserved when this option is increased.
+
+endmenu # DMA Controller
+
 menu "UART Peripherals"
 
 config HPM_UART0

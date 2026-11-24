@@ -81,3 +81,46 @@ Absolute address formulas were checked for GPIO0/PGPIO/FGPIO (144 offset
 and address assertions plus four port-index assertions). C and RV32 assembly
 can include the headers repeatedly. These formulas do not establish which
 ports a controller owns; the GPIO driver must validate that separately.
+
+HDMA and DMAMUX definitions
+--------------------------
+DMA V2 registers and request source numbers come from HPM5300 SDK files:
+  soc/HPM5300/ip/hpm_dmav2_regs.h
+  soc/HPM5300/ip/hpm_dmamux_regs.h
+  soc/HPM5300/HPM5361/hpm_dmamux_src.h
+  soc/HPM5300/HPM5361/hpm_soc_feature.h
+Behavior is cross-checked against HPM5300UM Rev1.2 chapters 27..29.
+The HPM5361 capacity is 32 channels, with word-width transfers and at most
+128 source transfers per burst. DMACFG.CHANNELNUM's raw 4-bit field is not
+used to size the pool. Descriptors require 32-byte alignment according to
+LLPOINTER bits 31..5 and the SDK. DMA V2 descriptors use CHANREQCTRL at
+0x0c and reserved words at 0x14/0x1c, not table 161's older address-high words.
+The driver fixes offsets/size with compile-time assertions. A 32-byte stride
+also prevents a descriptor from crossing a 4 KiB boundary.
+DMAMUX source IDs 0x10..0x13 are reserved; ID zero is a valid GPTMR source.
+The XPI0 register base (0xf3000000) is also provided by hpm_romapi.h.
+INTHALFSTS uses the SDK's W1C sequence despite the manual's RW annotation;
+that discrepancy remains a required hardware verification item.
+
+DMA operating modes
+-------------------
+UM 28.4.2 describes finite/circular linked lists; the first task is loaded in
+registers and nonzero LLPOINTER fetches the next task. UM 28.4.3 states native
+INFINITELOOP saves/reloads source, destination and length, and must not be
+combined with linked mode. BURSTOPT=1 encodes 1..16 transfers linearly, while
+BURSTOPT=0 encodes powers of two. TC is one status bit per channel, so software
+cannot infer exact elapsed cyclic block counts after interrupts coalesce.
+The XPI memory aperture size 0x0ff00000 follows UM chapter 16; actual populated
+Flash size and XPI setup remain the memory owner's responsibility.
+
+DMA cache-state and deferred-completion audit
+-------------------------------------------
+The HPM5361 CSR addresses MCACHE_CTL=0x7ca and MCCTLCOMMAND=0x7cc come from
+soc/HPM5300/HPM5361/hpm_csr_regs.h. DC_EN=bit1, DPREF_EN=bit10 and global
+D-cache writeback/invalidate command 6 come from arch/riscv/l1c/hpm_l1c_drv.h
+and its companion source. Cache-disabled startup preserves dirty loader data
+before disabling inherited caching. It does not enable a new CPU cache mode.
+Request-port selection uses the per-descriptor CHANREQCTRL fields rather than
+assuming a hardware channel/output identity. Raw mixed-request chains reserve
+multiple DMAMUX outputs transactionally; gated streams can safely reprogram
+one port only after the previous finite block has quiesced.

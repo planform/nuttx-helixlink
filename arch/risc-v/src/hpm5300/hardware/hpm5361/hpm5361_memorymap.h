@@ -1,11 +1,14 @@
-/*
+/****************************************************************************
+ * arch/risc-v/src/hpm5300/hardware/hpm5361/hpm5361_memorymap.h
+ *
  * Copyright (c) 2021-2026 HPMicro
  *
  * SPDX-License-Identifier: BSD-3-Clause
  *
  * Register definitions adapted from the HPM5300 SDK and HPM5361 SVD.
  * See hpm5300/REGISTER_SOURCES.txt for provenance and manual references.
- */
+ *
+ ****************************************************************************/
 
 #ifndef __ARCH_RISCV_SRC_HPM5300_HARDWARE_HPM5361_HPM5361_MEMORYMAP_H
 #define __ARCH_RISCV_SRC_HPM5300_HARDWARE_HPM5361_HPM5361_MEMORYMAP_H
@@ -25,6 +28,7 @@
 #define HPM_ROM_BASE  0x20000000
 #define HPM_ROM_SIZE  0x20000
 #define HPM_XPI0_MEMORY_BASE  0x80000000
+#define HPM_XPI0_MEMORY_SIZE  0x0ff00000
 
 /* Peripheral instances (HPM5361). */
 
@@ -84,6 +88,7 @@
 #define HPM_SYNT_BASE  0xf0328000
 #define HPM_SEI_BASE  0xf032c000
 #define HPM_TRGM0_BASE  0xf033c000
+#define HPM_XPI0_BASE  0xf3000000
 #define HPM_USB0_BASE  0xf300c000
 #define HPM_SDP_BASE  0xf3040000
 #define HPM_SEC_BASE  0xf3044000

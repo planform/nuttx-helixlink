@@ -38,6 +38,20 @@ CHIP_CSRCS += hpm_lowputc.c
 
 CHIP_CSRCS += hpm_serial.c hpm_timerisr.c
 
+ifeq ($(CONFIG_PM),y)
+ifneq ($(CONFIG_ARCH_CUSTOM_PMINIT),y)
+CHIP_CSRCS += hpm_pm.c
+endif
+endif
+
+ifeq ($(CONFIG_HPM_HDMA),y)
+CHIP_CSRCS += hpm_dma.c
+
+# The common initialization hook is weak. Pull its object from libarch even
+# before a peripheral driver references a DMA client API.
+LDFLAGS += -u riscv_dma_initialize
+endif
+
 ifeq ($(CONFIG_HPM_SPI),y)
 CHIP_CSRCS += hpm_spi.c
 endif

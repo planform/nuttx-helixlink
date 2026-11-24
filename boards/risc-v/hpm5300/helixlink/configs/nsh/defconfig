@@ -15,6 +15,9 @@ CONFIG_RAM_START=0x00080000
 CONFIG_RAM_SIZE=131072
 CONFIG_IDLETHREAD_STACKSIZE=4096
 
+# General HDMA channel management; SPI continues to use polling.
+CONFIG_HPM_HDMA=y
+
 # Retain debug information with size optimization for the ILM build.
 CONFIG_DEBUG_FEATURES=y
 CONFIG_DEBUG_SYMBOLS=y

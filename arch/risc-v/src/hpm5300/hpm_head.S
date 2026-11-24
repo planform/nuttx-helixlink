@@ -65,6 +65,24 @@ __start:
   csrw CSR_MIE, zero
   csrw CSR_MIP, zero
 
+#ifndef CONFIG_ARCH_DCACHE
+  /* Honor the cache-disabled build even after a warm boot/loader handoff.
+   * Preserve dirty loader data before disabling inherited data caching.
+   * No stack or other data writes occur between writeback and disable.
+   */
+
+  csrr t0, HPM_CSR_MCACHE_CTL
+  andi t0, t0, HPM_MCACHE_CTL_DC_EN
+  beqz t0, .Ldcache_disable
+  li   t0, HPM_CCTL_L1D_WBINVAL_ALL
+  csrw HPM_CSR_MCCTLCOMMAND, t0
+  fence iorw, iorw
+.Ldcache_disable:
+  li   t0, (HPM_MCACHE_CTL_DC_EN | HPM_MCACHE_CTL_DPREF_EN)
+  csrc HPM_CSR_MCACHE_CTL, t0
+  fence iorw, iorw
+#endif
+
   /* Disable the CPU-side PLIC vectored extension */
 
   li   t0, HPM_MMISC_CTL_VEC_PLIC

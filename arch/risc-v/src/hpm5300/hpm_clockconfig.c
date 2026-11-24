@@ -205,6 +205,19 @@ static int hpm_clock_group0_enable(unsigned int resource)
 }
 
 /****************************************************************************
+ * Name: hpm_dma_clockconfig
+ *
+ * Description:
+ *   Enable the HDMA/DMAMUX bus resource without changing CPU/PLL clocks.
+ *
+ ****************************************************************************/
+
+int hpm_dma_clockconfig(void)
+{
+  return hpm_clock_group0_enable(HPM_SYSCTL_RESOURCE_HDMA);
+}
+
+/****************************************************************************
  * Name: hpm_clock_node_configure
  *
  * Description:
